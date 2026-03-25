@@ -1,0 +1,93 @@
+name: Step 1 # 브랜치 만들기
+
+# 학습자가 1단계 작업을 완료했는지 확인합니다.
+# - 사용자가 'my-first-branch' 브랜치를 생성하면 트리거됩니다.
+# - 브랜치 이름이 'my-first-branch'인지 확인합니다.
+# - 모든 검사가 통과하면 워크플로우가 비활성화되어 다시 실행되지 않습니다.
+
+on:
+  push:
+    branches:
+      - "my-first-branch"
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+env:
+  STEP_2_FILE: ".github/steps/2-commit-a-file.md"
+
+jobs:
+  find_exercise:
+    name: 실습 이슈 찾기
+    uses: skills-kr/exercise-toolkit/.github/workflows/find-exercise-issue.yml@kr-v0.6.0
+
+  post_next_step_content:
+    name: 다음 단계 내용 게시
+    needs: [find_exercise]
+    runs-on: ubuntu-latest
+    env:
+      ISSUE_REPOSITORY: ${{ github.repository }}
+      ISSUE_NUMBER: ${{ needs.find_exercise.outputs.issue-number }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 응답 템플릿 가져오기
+        uses: actions/checkout@v4
+        with:
+          repository: skills-kr/exercise-toolkit
+          path: exercise-toolkit
+          ref: kr-v0.6.0
+
+      - name: 댓글 생성 - 단계 완료
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: exercise-toolkit/markdown-templates/step-feedback/step-finished-prepare-next-step.md
+          vars: |
+            next_step_number: 2
+
+      - name: 댓글 생성 - 단계 내용 추가
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: ${{ env.STEP_2_FILE }}
+
+      - name: 댓글 생성 - 진행 상황 확인 중
+        uses: GrantBirki/comment@v2.1.1
+        with:
+          repository: ${{ env.ISSUE_REPOSITORY }}
+          issue-number: ${{ env.ISSUE_NUMBER }}
+          file: exercise-toolkit/markdown-templates/step-feedback/watching-for-progress.md
+
+      - name: 현재 워크플로우 비활성화 및 다음 워크플로우 활성화
+        run: |
+          gh workflow disable "${{github.workflow}}"
+          gh workflow enable "Step 2"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Workshop Tracker에 단계 보고
+        if: success()
+        continue-on-error: true
+        run: |
+          SESSION_ID=$(jq -r '.sessionId' .github/workshop-config.json)
+          TRACK=$(jq -r '.track' .github/workshop-config.json)
+          API_URL=$(jq -r '.apiUrl' .github/workshop-config.json)
+          curl -s -X POST "$API_URL" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "sessionId": "'"$SESSION_ID"'",
+              "type": "step",
+              "step": 1,
+              "description": "브랜치 만들기",
+              "username": "'"$GITHUB_ACTOR"'",
+              "repo": "'"$GITHUB_REPOSITORY"'",
+              "track": "'"$TRACK"'",
+              "runId": "'"$GITHUB_RUN_ID"'"
+            }' || true
